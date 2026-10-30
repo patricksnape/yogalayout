@@ -1,0 +1,51 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python ${{ matrix.python }} --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest -q
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v5
+      - name: Build with ASan/UBSan and run the tests
+        run: |
+          uv venv --python 3.14 .venv-asan
+          uv pip install --python .venv-asan scikit-build-core nanobind pytest cmake
+          CMAKE_ARGS="-DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_BUILD_TYPE=Debug" \
+            uv pip install --python .venv-asan --no-build-isolation .
+          LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libubsan.so)" \
+          ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+            .venv-asan/bin/python -m pytest -q
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build --sdist
+      - name: Build and test from the sdist (no git, no network for Yoga)
+        run: |
+          uv venv .venv-sdist
+          uv pip install --python .venv-sdist dist/*.tar.gz pytest
+          cd tests && ../.venv-sdist/bin/python -m pytest -q
