@@ -1,0 +1,36 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.4"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "yogalayout"
+version = "0.1.0.dev0"
+description = "RAII Python bindings for the Yoga flexbox layout engine"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+requires-python = ">=3.10"
+classifiers = ["Typing :: Typed"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pyright", "ruff"]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+wheel.packages = ["src/yogalayout"]
+wheel.py-api = "cp312"
+sdist.include = ["extern/yoga/yoga", "extern/yoga/cmake", "extern/yoga/LICENSE"]
+sdist.exclude = ["extern/yoga/tests", "extern/yoga/java", "extern/yoga/javascript", "extern/yoga/website", "extern/yoga/csharp", "extern/yoga/benchmark", "extern/yoga/fuzz"]
+build-dir = "build/{wheel_tag}"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["extern"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests"]
