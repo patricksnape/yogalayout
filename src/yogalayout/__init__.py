@@ -70,14 +70,19 @@ _GUTTERS = {"gap": Gutter.ALL, "row_gap": Gutter.ROW, "column_gap": Gutter.COLUM
 _INSETS = {"top", "bottom", "left", "right", "start", "end"}
 
 
+def _norm(name: str) -> str:
+    return str(name).lower().replace("-", "").replace("_", "")
+
+
 def _enum(kind: Any, value: Any) -> Any:
+    """Look up an enum member by name, ignoring case, '-' and '_' (CSS ``nowrap`` == ``NO_WRAP``)."""
     if isinstance(value, kind):
         return value
-    try:
-        return kind[str(value).upper().replace("-", "_")]
-    except KeyError:
-        names = ", ".join(m.lower() for m in kind.__members__)
-        raise ValueError(f"invalid {kind.__name__} {value!r}; expected one of: {names}") from None
+    for name, member in kind.__members__.items():
+        if _norm(name) == _norm(value):
+            return member
+    names = ", ".join(m.lower().replace("_", "-") for m in kind.__members__)
+    raise ValueError(f"invalid {kind.__name__} {value!r}; expected one of: {names}")
 
 
 def _shorthand(setter: Callable[[Edge, Any], None], value: Any) -> None:

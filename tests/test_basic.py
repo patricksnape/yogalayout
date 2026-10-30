@@ -128,9 +128,17 @@ def test_style_errors_and_shorthands():
     assert n.get_margin(Edge.RIGHT).value == 2
     with pytest.raises(TypeError):
         Node(bogus=1)
-    with pytest.raises(ValueError, match="row"):
+    with pytest.raises(ValueError, match="column-reverse"):
         Node(flex_direction="diagonal")
     with pytest.raises(ValueError):
         Node(min_width="auto")
     with pytest.raises(ValueError):
         Node(width="12px")
+
+
+@pytest.mark.parametrize("spelling", ["nowrap", "no-wrap", "no_wrap", "NO_WRAP", "NoWrap"])
+def test_enum_names_are_spelling_tolerant(spelling):
+    from yogalayout import Wrap
+
+    assert Node(flex_wrap=spelling).flex_wrap == Wrap.NO_WRAP
+    assert Node(flex_wrap="wrap-reverse").flex_wrap == Wrap.WRAP_REVERSE
