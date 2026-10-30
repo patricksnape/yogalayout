@@ -101,13 +101,11 @@ def line(ln: str) -> str | None:
             return f"{node}.{LENGTH_PROPS[name]} = {pct(val) if mode else num(val)}"
         if name in FLOAT_PROPS and not mode:
             return f"{node}.{FLOAT_PROPS[name]} = {num(val)}"
-    if m := re.fullmatch(r"YGNodeStyleSet(\w+?)Auto\((\w+)\);", ln):
-        if m[1] in LENGTH_PROPS:
-            return f'{m[2]}.{LENGTH_PROPS[m[1]]} = "auto"'
-    if m := re.fullmatch(r"YGNodeStyleSet(\w+)\((\w+), (YG\w+)\);", ln):
-        if m[1] in ENUM_PROPS:
-            attr, kind = ENUM_PROPS[m[1]]
-            return f"{m[2]}.{attr} = {enum(m[3], kind)}"
+    if (m := re.fullmatch(r"YGNodeStyleSet(\w+?)Auto\((\w+)\);", ln)) and m[1] in LENGTH_PROPS:
+        return f'{m[2]}.{LENGTH_PROPS[m[1]]} = "auto"'
+    if (m := re.fullmatch(r"YGNodeStyleSet(\w+)\((\w+), (YG\w+)\);", ln)) and m[1] in ENUM_PROPS:
+        attr, kind = ENUM_PROPS[m[1]]
+        return f"{m[2]}.{attr} = {enum(m[3], kind)}"
     if m := re.fullmatch(
         rf"YGNodeStyleSet(\w+?)(Percent|Auto)?\((\w+), (YGEdge\w+)(?:, ({NUM}))?\);", ln
     ):
@@ -117,15 +115,16 @@ def line(ln: str) -> str | None:
             return f"{node}.set_{EDGE_PROPS[name]}({enum(e, 'Edge')}, {v})"
     if m := re.fullmatch(rf"YGNodeStyleSetGap(Percent)?\((\w+), (YGGutter\w+), ({NUM})\);", ln):
         return f"{m[2]}.set_gap({enum(m[3], 'Gutter')}, {pct(m[4]) if m[1] else num(m[4])})"
-    if m := re.fullmatch(rf"ASSERT_FLOAT_EQ\(({NUM}), YGNodeLayoutGet(\w+)\((\w+)\)\);", ln):
-        if m[2] in LAYOUT:
-            return f"assert {m[3]}.layout.{LAYOUT[m[2]]} == pytest.approx({num(m[1])}, abs=1e-4)"
+    if (
+        m := re.fullmatch(rf"ASSERT_FLOAT_EQ\(({NUM}), YGNodeLayoutGet(\w+)\((\w+)\)\);", ln)
+    ) and m[2] in LAYOUT:
+        return f"assert {m[3]}.layout.{LAYOUT[m[2]]} == pytest.approx({num(m[1])}, abs=1e-4)"
     _raise(ln)
 
 
 def convert(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     body, skipped = [], []
-    for m in re.finditer(r"TEST\(YogaTest, (\w+)\) \{\n(.*?)\n\}\n", path.read_text(), re.S):
+    for m in re.finditer(r"TEST\(YogaTest, (\w+)\) \{\n(.*?)\n\}\n", path.read_text(), re.DOTALL):
         name, code = m.groups()
         try:
             lines = [t for t in (line(ln) for ln in code.split("\n")) if t]
