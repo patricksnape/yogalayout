@@ -1,6 +1,7 @@
 """Building and dropping trees must release the Yoga nodes too (no C++ memory growth)."""
 
 import gc
+import os
 import sys
 
 import pytest
@@ -8,6 +9,11 @@ import pytest
 from yogalayout import Config, Node
 
 resource = pytest.importorskip("resource")  # not available on Windows
+
+# Sanitizers keep freed memory in quarantine, so RSS says nothing there.
+pytestmark = pytest.mark.skipif(
+    bool(os.environ.get("ASAN_OPTIONS")), reason="RSS is meaningless under ASan"
+)
 
 
 def rss_kib() -> int:

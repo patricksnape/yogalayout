@@ -50,7 +50,8 @@ struct ConfigEdit {
   std::lock_guard<std::mutex> g;
   explicit ConfigEdit(Config& c) : g(c.m) {
     if (c.frozen)
-      throw std::runtime_error("Config is in use by nodes; set options before creating nodes");
+      throw nb::builtin_exception(nb::exception_type::runtime_error,
+                                  "Config is in use by nodes; set options before creating nodes");
   }
 };
 
@@ -166,7 +167,8 @@ class Writer {
  public:
   explicit Writer(Node& n, Node* other = nullptr) : g_(n, other) {
     if (g_.tree().busy || (g_.other() && g_.other()->busy))
-      throw std::runtime_error(
+      throw nb::builtin_exception(
+          nb::exception_type::runtime_error,
           "cannot modify a tree while an operation (calculate_layout or a change) is running on it");
     ++g_.tree().busy;
     if (g_.other()) ++g_.other()->busy;
@@ -561,9 +563,9 @@ NB_MODULE(_core, m) {
         for (auto& c : n.children) l.append(c);
         return nb::tuple(l);
       })
-      .def("child", [](Node& n, ssize_t i) {
+      .def("child", [](Node& n, Py_ssize_t i) {
         TreeGuard g(n);
-        ssize_t count = (ssize_t)n.children.size();
+        Py_ssize_t count = (Py_ssize_t)n.children.size();
         if (i < 0) i += count;
         if (i < 0 || i >= count) throw nb::index_error("child index out of range");
         return n.children[i];
