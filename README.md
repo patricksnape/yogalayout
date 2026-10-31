@@ -23,6 +23,10 @@ corrupting each other.
 * Reparenting moves a whole subtree to the new tree's lock, so a `Node` may be handed between
   threads freely.
 
+## More
+
+* [`docs/HANDOVER.md`](docs/HANDOVER.md): design, dev setup, status and next steps.
+
 ## License
 
 MIT (see `LICENSE`). Yoga itself is also MIT-licensed; see `THIRD_PARTY_LICENSES.md`.
