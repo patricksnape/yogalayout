@@ -2,6 +2,27 @@
 
 RAII Python bindings for [Yoga](https://www.yogalayout.dev/) (v3.2.1, public C API only).
 
+## Thread safety
+
+Free-threaded CPython (3.14t) is supported; on GIL builds the same rules keep threads from
+corrupting each other.
+
+* All nodes of one tree share a lock and every method takes it. **Different trees run in
+  parallel; one tree is used by one thread at a time** (other threads wait, with the GIL
+  released), so you never need your own lock around a tree.
+* While `calculate_layout()` (or a style change, which can fire the `dirtied` callback) runs on a
+  tree, **changing that tree raises `RuntimeError`**. This includes calling `calculate_layout`
+  again, inserting/removing nodes and setting styles or callbacks from inside a measure, baseline
+  or dirtied callback. Reading (`node.layout`, `children`, `parent`, style getters) is allowed.
+  Layout of a *different* tree from a callback is fine.
+* An exception raised by a callback is re-raised, with its original type, by the call that caused
+  it, in the thread that made the call. A measure function returning NaN/negative sizes, or a
+  baseline function returning NaN (which would abort inside Yoga), raises `ValueError`.
+* A `Config` is frozen once a node uses it: set `point_scale_factor`, `errata` etc. before
+  creating nodes.
+* Reparenting moves a whole subtree to the new tree's lock, so a `Node` may be handed between
+  threads freely.
+
 ## License
 
 MIT (see `LICENSE`). Yoga itself is also MIT-licensed; see `THIRD_PARTY_LICENSES.md`.

@@ -17,7 +17,12 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga/yoga/CMakeLists.txt")
 endif()
 add_subdirectory(extern/yoga/yoga EXCLUDE_FROM_ALL)
 
-nanobind_add_module(_core STABLE_ABI NB_STATIC src/yogalayout/_core.cpp)
+# Free-threaded builds need PyUnstable_TryIncRef (3.14+); on 3.13t the module keeps the GIL.
+set(_ft "")
+if(Python_VERSION VERSION_GREATER_EQUAL 3.14)
+  set(_ft FREE_THREADED)
+endif()
+nanobind_add_module(_core STABLE_ABI ${_ft} NB_STATIC src/yogalayout/_core.cpp)
 target_link_libraries(_core PRIVATE yogacore)
 target_include_directories(_core PRIVATE extern/yoga)
 install(TARGETS _core LIBRARY DESTINATION yogalayout)

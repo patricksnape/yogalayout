@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from yogalayout import Config, Node
+from yogalayout import Config, Edge, Node
 
 TIMEOUT = 60
 
@@ -78,8 +78,8 @@ def test_one_shared_tree_under_concurrent_use_stays_consistent():
                 _ = [tuple(c.layout) for c in root.children]
             else:
                 root.width = 200 + i
-                root.set_padding(0, i)
-                assert len(root.children) == len(root)
+                root.set_padding(Edge.ALL, i)
+                assert 4 <= len(root) <= 4 + 2  # two threads insert one extra child at a time
         return True
 
     assert all(run(work, 6))
@@ -164,6 +164,7 @@ def test_dropping_a_parent_while_a_child_is_in_use():
                 for _ in range(50):
                     child.width = 3
                     child.calculate_layout()
+                    child.parent  # noqa: B018 - races with the parent being destroyed
             return True
 
         assert all(run(work, 2))

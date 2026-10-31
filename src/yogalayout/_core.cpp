@@ -73,6 +73,7 @@ struct Node {
   nb::object config;                 // keeps the owning Config alive (None => default config)
   std::vector<nb::object> children;  // mirrors Yoga's child list
   nb::object measure, baseline, dirtied;
+  nb::object parent_ref;             // weakref to the parent's Python object (empty if none)
   std::shared_ptr<TreeLock> tree = std::make_shared<TreeLock>();
 
   explicit Node(nb::object cfg) : config(std::move(cfg)) {
@@ -189,7 +190,11 @@ std::shared_ptr<TreeLock> freshTree() { return std::make_shared<TreeLock>(); }
 // Detach every child (Yoga keeps the nodes) and give each its own lock. Caller holds the lock.
 void detachChildren(Node& n) {
   YGNodeRemoveAllChildren(n.ref);
-  for (auto& c : n.children) retree(nb::cast<Node&>(c), freshTree());
+  for (auto& c : n.children) {
+    Node& child = nb::cast<Node&>(c);
+    child.parent_ref.reset();
+    retree(child, freshTree());
+  }
 }
 
 Node::~Node() {
@@ -203,6 +208,23 @@ Node::~Node() {
 }  // `old` releases the children here, outside the lock; each frees itself the same way
 
 Node* nodeOf(YGNodeConstRef n) { return static_cast<Node*>(YGNodeGetContext(n)); }
+
+// A new reference to the Python object of `n`'s parent, or an empty object if there is none or
+// it is already being destroyed. This goes through a weak reference: the destructor of a dying
+// parent waits for our tree lock, and a plain reference taken to it meanwhile would resurrect it
+// and free it twice (CPython's weakref machinery is the supported way to race with a decref).
+nb::object parentObject(Node& n) {
+  if (!n.parent_ref.is_valid()) return nb::object();
+#ifdef Py_GIL_DISABLED
+  PyObject* o = nullptr;
+  if (PyWeakref_GetRef(n.parent_ref.ptr(), &o) <= 0) return nb::object();
+  return nb::steal(o);
+#else
+  PyObject* o = PyWeakref_GetObject(n.parent_ref.ptr());  // borrowed; None once the parent died
+  if (!o || o == Py_None || Py_REFCNT(o) <= 0) return nb::object();
+  return nb::borrow(o);
+#endif
+}
 
 // Called from inside a catch block: keep the exception as a Python error for rethrow later.
 void recordError() {
@@ -270,6 +292,7 @@ void dirtiedTrampoline(YGNodeConstRef n) {
   Node* node = nodeOf(n);
   if (t_pending) return;
   try {
+    // The node is alive: a callback only runs during an operation on a tree that holds it.
     nb::handle self = nb::find(node);
     if (self.is_valid()) node->dirtied(self);
   } catch (...) {
@@ -299,6 +322,7 @@ int nodeClear(PyObject* self) {
   std::vector<nb::object> old;
   {
     TreeGuard g(*n);
+    if (g.tree().busy) return 0;  // GC ran inside a callback of this very tree: try again later
     detachChildren(*n);
     old.swap(n->children);
   }
@@ -502,6 +526,10 @@ NB_MODULE(_core, m) {
           throw nb::value_error("a node with a measure function cannot have children");
         YGNodeInsertChild(self.ref, child.ref, idx);
         self.children.insert(self.children.begin() + idx, std::move(child_obj));
+        nb::object parent_obj = nb::borrow(nb::find(&self));
+        PyObject* wr = PyWeakref_NewRef(parent_obj.ptr(), nullptr);
+        if (!wr) throw nb::python_error();
+        child.parent_ref = nb::steal(wr);
         retree(child, treeOf(self));
         w.finish();
       }, "child"_a, "index"_a = nb::none())
@@ -512,6 +540,7 @@ NB_MODULE(_core, m) {
           if (self.children[i].ptr() == child_obj.ptr()) {
             YGNodeRemoveChild(self.ref, child.ref);
             self.children.erase(self.children.begin() + i);
+            child.parent_ref.reset();
             retree(child, freshTree());
             w.finish();
             return;
@@ -544,7 +573,8 @@ NB_MODULE(_core, m) {
         TreeGuard g(n);
         YGNodeRef p = YGNodeGetParent(n.ref);
         if (!p) return nb::none();
-        return nb::borrow(nb::find(nodeOf(p)));
+        nb::object parent = parentObject(n);
+        return parent.is_valid() ? parent : nb::none();
       })
       .def("_tree_id", [](Node& n) {  // identity of the lock shared by this node's tree (for tests)
         TreeGuard g(n);
@@ -554,10 +584,11 @@ NB_MODULE(_core, m) {
   // layout
   node.def("calculate_layout", [](Node& n, std::optional<float> w, std::optional<float> h, YGDirection d) {
         Writer wr(n);
-        // Keep the topmost ancestor alive for the duration (the GC could otherwise clear it).
-        YGNodeRef top = n.ref;
-        while (YGNodeRef p = YGNodeGetParent(top)) top = p;
-        nb::object keep = nb::borrow(nb::find(nodeOf(top)));
+        // Keep the topmost ancestor alive for the duration (a GC run inside a callback could
+        // otherwise clear it mid-layout). A parent that is already dying cannot finish before
+        // we release the lock, so the chain simply stops there.
+        nb::object keep = nb::borrow(nb::find(&n));
+        while (nb::object up = parentObject(nb::cast<Node&>(keep))) keep = std::move(up);
         YGNodeCalculateLayout(n.ref, w.value_or(YGUndefined), h.value_or(YGUndefined), d);
         wr.finish();
       }, "width"_a = nb::none(), "height"_a = nb::none(), "direction"_a = YGDirectionLTR)

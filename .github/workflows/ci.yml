@@ -21,6 +21,20 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest -q
 
+  free-threaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v5
+      - name: Build for free-threaded CPython and run the tests, also in parallel threads
+        run: |
+          uv venv --python 3.14t .venv-ft
+          uv pip install --python .venv-ft pytest hypothesis pytest-run-parallel .
+          .venv-ft/bin/python -c "import sys, yogalayout; assert not sys._is_gil_enabled(), 'GIL was re-enabled'"
+          .venv-ft/bin/python -m pytest -q
+          .venv-ft/bin/python -m pytest -q --parallel-threads=4 tests/test_basic.py tests/conformance
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:
@@ -30,7 +44,7 @@ jobs:
       - name: Build with ASan/UBSan and run the tests
         run: |
           uv venv --python 3.14 .venv-asan
-          uv pip install --python .venv-asan scikit-build-core nanobind pytest cmake
+          uv pip install --python .venv-asan scikit-build-core nanobind pytest hypothesis cmake
           CMAKE_ARGS="-DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_BUILD_TYPE=Debug" \
             uv pip install --python .venv-asan --no-build-isolation .
           LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libubsan.so)" \
