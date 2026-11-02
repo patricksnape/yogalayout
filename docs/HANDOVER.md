@@ -71,10 +71,16 @@ translate `std::runtime_error` (now `nb::builtin_exception`), MSVC has no `ssize
 
 ## Next steps (priority order)
 1. ~~CI green~~ (done). `pixflex` still has no CI.
-2. **Wheels + release**: `cibuildwheel` (linux x86_64/aarch64, macOS arm64/x86_64, win amd64;
-   abi3 for cp312+, normal wheels for 3.10/3.11, `cp314t`), PyPI trusted publishing on tags.
-   Exclude `src/yogalayout/_core.cpp` from the wheel. **Reserve the PyPI names `yogalayout` and
-   `pixflex` first** (until then `pip install pixflex` could resolve a squatted `yogalayout`).
+2. **First release** (wheels workflow `.github/workflows/wheels.yml` is written and verified: build-only
+   run 41521217020 produced 28 wheels + sdist, all tested, `twine check --strict` passed). Remaining,
+   needs the user's accounts:
+   - pypi.org (and test.pypi.org): add a *pending trusted publisher* for project `yogalayout`: owner
+     `patricksnape`, repo `yogalayout`, workflow `wheels.yml`, environment `pypi` (`testpypi`). This
+     also reserves the name (`pixflex` likewise, for its own repo).
+   - GitHub repo settings: create environments `pypi` and `testpypi` (optionally required reviewers on `pypi`).
+   - Try TestPyPI first: Actions > Wheels > Run workflow > `publish: testpypi`. Then bump the version
+     in `pyproject.toml` (currently `0.1.0.dev0`) and push tag `vX.Y.Z` (must equal the version).
+   - No GPG: PyPI dropped PGP; trusted publishing uploads Sigstore attestations (PEP 740) automatically.
 3. Optional ThreadSanitizer build on 3.14t (CPython itself is not TSan-instrumented, so expect noise).
 4. Missing API surface (not needed by pixflex): `set_children`, config `context`/logging,
    cloning, `YGNodeSetNodeType`/text nodes, per-edge getters for computed layout values beyond
