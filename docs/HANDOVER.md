@@ -63,19 +63,14 @@ PATH=$PWD/.venv/bin:$PATH uv pip install --python .venv --no-build-isolation -e 
 - Gotchas: `nb::python_error` is not move-assignable (hold in `unique_ptr`); `#Name` stringizing
   gives CamelCase (pass explicit lowercase names); exact-size roots skip the measure callback.
 
-## CI status (first run 2026-10-31, run 41191844050)
-Green on first run: ubuntu 3.10/3.14, free-threaded 3.14t, sdist. Found and fixed (commit after
-the handover, **not yet verified by a CI run**):
-- macOS: `throw std::runtime_error` from `Writer`/`ConfigEdit` was not translated by nanobind
-  ("exception could not be translated", 8 tests). Now `nb::builtin_exception(runtime_error, ...)`.
-- Windows: MSVC has no `ssize_t` (`child()` getter); now `Py_ssize_t`. Other MSVC errors may remain
-  hidden behind that one (`/W4 /WX` applies to Yoga's own target).
-- Sanitizers job: `test_leaks.py` RSS check is meaningless under ASan (quarantine); skipped when
-  `ASAN_OPTIONS` is set.
+## CI status
+**Green on all 9 jobs** (ubuntu/macos/windows x 3.10/3.14, free-threaded 3.14t, ASan/UBSan, sdist;
+run 41192034218). The first run (41191844050) found three bugs, all fixed: macOS could not
+translate `std::runtime_error` (now `nb::builtin_exception`), MSVC has no `ssize_t`
+(now `Py_ssize_t`), and the RSS leak test is skipped under ASan (quarantine).
 
 ## Next steps (priority order)
-1. **Re-run CI** (`gh run list` / `gh run view --log-failed`) and keep fixing the Windows/macOS
-   matrix until green; one commit per fix.
+1. ~~CI green~~ (done). `pixflex` still has no CI.
 2. **Wheels + release**: `cibuildwheel` (linux x86_64/aarch64, macOS arm64/x86_64, win amd64;
    abi3 for cp312+, normal wheels for 3.10/3.11, `cp314t`), PyPI trusted publishing on tags.
    Exclude `src/yogalayout/_core.cpp` from the wheel. **Reserve the PyPI names `yogalayout` and
