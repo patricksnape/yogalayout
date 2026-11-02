@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
-      - uses: pypa/cibuildwheel@v4
+      - uses: pypa/cibuildwheel@v4.3.5
         # build selection, tests and macOS target are configured in pyproject.toml
       - uses: actions/upload-artifact@v4
         with:
