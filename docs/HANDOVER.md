@@ -71,17 +71,12 @@ translate `std::runtime_error` (now `nb::builtin_exception`), MSVC has no `ssize
 
 ## Next steps (priority order)
 1. ~~CI green~~ (done). `pixflex` still has no CI.
-2. **First release** (wheels workflow `.github/workflows/wheels.yml` is written and verified: build-only
-   run 41521217020 produced 28 wheels + sdist, all tested, `twine check --strict` passed). Remaining,
-   needs the user's accounts:
-   - pypi.org (and test.pypi.org): add a *pending trusted publisher* for project `yogalayout`: owner
-     `patricksnape`, repo `yogalayout`, workflow `wheels.yml`, environment `pypi` (`testpypi`). This
-     also reserves the name (`pixflex` likewise, for its own repo).
-   - GitHub repo settings: create environments `pypi` and `testpypi` (optionally required reviewers on `pypi`).
-   - TestPyPI dry run DONE 2026-11-02 (0.1.0.dev0, 29 files): installs and lays out on 3.14 (abi3 wheel, GIL) and 3.14t (cp314t wheel, GIL stays off). The `testpypi` environment has required reviewers, so approve the deployment in the Actions run. Note `0.1.0.dev0` is now used on TestPyPI; bump before re-uploading.
-   - (was) Try TestPyPI first: Actions > Wheels > Run workflow > `publish: testpypi`. Then bump the version
-     in `pyproject.toml` (currently `0.1.0.dev0`) and push tag `vX.Y.Z` (must equal the version).
-   - No GPG: PyPI dropped PGP; trusted publishing uploads Sigstore attestations (PEP 740) automatically.
+2. ~~First release~~ **DONE: `yogalayout` 0.1.0 is on PyPI** (2026-11-02, tag `v0.1.0`, 29 files, Sigstore
+   attestations present). Verified `pip install yogalayout` + a layout on 3.14 (abi3, GIL) and 3.14t
+   (cp314t, no-gil). Release procedure for later versions: bump `version` in `pyproject.toml`, push, tag
+   `vX.Y.Z` (`git tag -a vX.Y.Z -m ...`: tags are signed by default in the user's git config), approve the
+   `pypi` environment deployment in the Actions run. Right after publishing, the PyPI index can lag a
+   few minutes (a first install failed with "no versions" and worked on retry).
 3. Optional ThreadSanitizer build on 3.14t (CPython itself is not TSan-instrumented, so expect noise).
 4. Missing API surface (not needed by pixflex): `set_children`, config `context`/logging,
    cloning, `YGNodeSetNodeType`/text nodes, per-edge getters for computed layout values beyond

@@ -2,6 +2,15 @@
 
 RAII Python bindings for [Yoga](https://www.yogalayout.dev/) (v3.2.1, public C API only).
 
+## Install
+
+```
+pip install yogalayout
+```
+
+Wheels for Linux (x86_64, aarch64), macOS (x86_64, arm64) and Windows (amd64): one abi3 wheel for
+Python 3.12+, wheels for 3.10/3.11, and a free-threaded 3.14t wheel.
+
 ## Thread safety
 
 Free-threaded CPython (3.14t) is supported; on GIL builds the same rules keep threads from
