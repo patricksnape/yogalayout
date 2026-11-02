@@ -1,0 +1,95 @@
+name: Wheels
+
+# Builds wheels + sdist on every PR, on manual runs and on version tags. Publishing uses PyPI
+# trusted publishing (OIDC, no tokens) and uploads PEP 740 attestations automatically.
+#   * push a tag `vX.Y.Z` (must equal the version in pyproject.toml) -> PyPI
+#   * manual run with `publish: testpypi`                              -> TestPyPI
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Where to publish the built files"
+        type: choice
+        options: [none, testpypi]
+        default: none
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest      # linux x86_64 (manylinux + musllinux)
+          - ubuntu-24.04-arm   # linux aarch64
+          - windows-latest     # win amd64
+          - macos-15-intel     # macOS x86_64
+          - macos-latest       # macOS arm64
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: pypa/cibuildwheel@v4
+        # build selection, tests and macOS target are configured in pyproject.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  check:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: ls -l dist
+      - run: pipx run twine check --strict dist/*
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi        # create this environment in the repo settings (optionally with required reviewers)
+    permissions:
+      id-token: write        # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match the package version
+        run: |
+          version=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != version v$version"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi'
+    needs: check
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

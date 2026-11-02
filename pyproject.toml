@@ -19,6 +19,7 @@ dev = ["pytest>=8", "pyright", "ruff", "hypothesis", "pytest-run-parallel"]
 minimum-version = "build-system.requires"
 wheel.packages = ["src/yogalayout"]
 wheel.py-api = "cp312"
+wheel.exclude = ["**/*.cpp"]
 sdist.include = ["extern/yoga/yoga", "extern/yoga/cmake", "extern/yoga/LICENSE"]
 sdist.exclude = ["extern/yoga/tests", "extern/yoga/java", "extern/yoga/javascript", "extern/yoga/website", "extern/yoga/csharp", "extern/yoga/benchmark", "extern/yoga/fuzz"]
 build-dir = "build/{wheel_tag}"
@@ -34,3 +35,14 @@ extend-exclude = ["extern", "tests/conformance"]
 venvPath = "."
 venv = ".venv"
 include = ["src", "tests"]
+
+[tool.cibuildwheel]
+# abi3 wheel from cp312 covers 3.12+ (GIL builds); 3.10/3.11 get their own; free-threaded 3.14t
+# cannot use abi3, so it is built separately. No 32-bit builds.
+build = ["cp310-*", "cp311-*", "cp312-*", "cp314t-*"]
+skip = ["*-win32", "*_i686"]
+test-requires = ["pytest", "hypothesis"]
+test-command = "pytest {project}/tests -q"
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
