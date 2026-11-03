@@ -35,6 +35,11 @@ submodule (`extern/yoga`, pinned to tag v3.2.1); only `extern/yoga/yoga` is buil
   tree from inside one of its own callbacks raises `RuntimeError` (this fixed a real
   use-after-free). Reparenting moves a whole subtree to the new lock; detaching gives each
   subtree a fresh one. `Config` is frozen once a node uses it.
+- **Multi-tree locking.** `TreeGuard` locks any set of trees in address order (deadlock-free) and
+  re-checks every node's tree after locking; `set_children` uses it to take the parent's and all
+  new children's locks at once. Validation happens before any change, so a failed `set_children` is a
+  no-op. `asNode()` turns a non-Node argument into `TypeError` (nanobind's `bad_cast` would surface as
+  `RuntimeError`).
 - **Free-threading.** `FREE_THREADED` is passed to nanobind only on Python >= 3.14 (needs
   `PyUnstable` weakref semantics); 3.13t keeps the GIL. abi3 wheels for GIL builds, a separate
   `cp314t` build for free-threaded.
@@ -78,7 +83,10 @@ translate `std::runtime_error` (now `nb::builtin_exception`), MSVC has no `ssize
    `pypi` environment deployment in the Actions run. Right after publishing, the PyPI index can lag a
    few minutes (a first install failed with "no versions" and worked on retry).
 3. Optional ThreadSanitizer build on 3.14t (CPython itself is not TSan-instrumented, so expect noise).
-4. Missing API surface (not needed by pixflex): `set_children`, config `context`/logging,
-   cloning, `YGNodeSetNodeType`/text nodes, per-edge getters for computed layout values beyond
-   margin/padding/border.
-5. More lifetime tests: reparenting under GC pressure, `__init__.Node(children=...)` error paths.
+4. API added in 0.2.0: `set_children`, `node_type`, `always_forms_containing_block`,
+   `is_reference_baseline`, `has_baseline`. Deliberately **not bound** (see README): clone/reset/
+   finalize/free-recursive, config logger (the only reachable Yoga log lines are failed asserts, which
+   we pre-check, and invalid measure sizes, which we reject; a logger could not be tested), config
+   context, `YGNodeSwapChild`.
+5. Lifetime tests for `set_children` (leak/resurrection, threads) exist in `tests/test_api_extras.py`;
+   `tests/test_readme.py` executes the README snippets so the docs cannot rot.

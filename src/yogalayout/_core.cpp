@@ -15,6 +15,7 @@
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -107,41 +108,56 @@ void retree(Node& n, const std::shared_ptr<TreeLock>& t) {
   for (auto& c : n.children) retree(nb::cast<Node&>(c), t);
 }
 
-// Locks the tree(s) of one or two nodes. Blocking happens with the GIL released (the holder may
-// be a Python callback waiting for it); the node's tree is re-checked after locking because it
-// can move to another tree while we wait.
+// Locks the tree of `x` plus the trees of any `others`. Locks are always taken in address order
+// (so two threads locking overlapping sets cannot deadlock). Blocking happens with the GIL
+// released (the holder may be a Python callback waiting for it); every node's tree is re-checked
+// after locking because it can move to another tree while we wait.
 class TreeGuard {
  public:
-  explicit TreeGuard(Node& x, Node* y = nullptr) {
+  explicit TreeGuard(Node& x, const std::vector<Node*>& others = {}) {
     for (;;) {
-      auto a = treeOf(x);
-      auto b = y ? treeOf(*y) : a;
-      bool two = a != b;
-      bool got = two ? std::try_lock(a->m, b->m) < 0 : a->m.try_lock();
-      if (!got) {
+      auto primary = treeOf(x);
+      std::vector<std::shared_ptr<TreeLock>> seen;
+      for (Node* o : others) seen.push_back(treeOf(*o));
+      std::vector<std::shared_ptr<TreeLock>> all = seen;
+      all.push_back(primary);
+      std::sort(all.begin(), all.end(), [](auto& l, auto& r) { return l.get() < r.get(); });
+      all.erase(std::unique(all.begin(), all.end()), all.end());
+      if (!tryLockAll(all)) {
         nb::gil_scoped_release release;
-        if (two) std::lock(a->m, b->m); else a->m.lock();
+        for (auto& l : all) l->m.lock();
       }
-      if (treeOf(x) == a && (!y || treeOf(*y) == b)) {
-        a_ = std::move(a);
-        if (two) b_ = std::move(b);
+      bool same = treeOf(x) == primary;
+      for (size_t i = 0; same && i < others.size(); ++i) same = treeOf(*others[i]) == seen[i];
+      if (same) {
+        primary_ = std::move(primary);
+        locks_ = std::move(all);
         return;
       }
-      a->m.unlock();
-      if (two) b->m.unlock();
+      unlockAll(all);
     }
   }
   TreeGuard(const TreeGuard&) = delete;
   TreeGuard& operator=(const TreeGuard&) = delete;
-  ~TreeGuard() {
-    a_->m.unlock();
-    if (b_) b_->m.unlock();
-  }
-  TreeLock& tree() { return *a_; }
-  TreeLock* other() { return b_.get(); }
+  ~TreeGuard() { unlockAll(locks_); }
+  TreeLock& tree() { return *primary_; }  // the tree of the node the guard was made for
+  const std::vector<std::shared_ptr<TreeLock>>& locks() const { return locks_; }
 
  private:
-  std::shared_ptr<TreeLock> a_, b_;
+  static bool tryLockAll(const std::vector<std::shared_ptr<TreeLock>>& ls) {
+    for (size_t i = 0; i < ls.size(); ++i) {
+      if (!ls[i]->m.try_lock()) {
+        for (size_t j = i; j-- > 0;) ls[j]->m.unlock();
+        return false;
+      }
+    }
+    return true;
+  }
+  static void unlockAll(const std::vector<std::shared_ptr<TreeLock>>& ls) {
+    for (size_t i = ls.size(); i-- > 0;) ls[i]->m.unlock();
+  }
+  std::shared_ptr<TreeLock> primary_;
+  std::vector<std::shared_ptr<TreeLock>> locks_;
 };
 
 // Exception raised inside a callback, kept per thread and rethrown once Yoga has returned.
@@ -165,19 +181,18 @@ void rethrowPending() {
 // it (nested mutation from a callback). Call finish() to rethrow a callback's error.
 class Writer {
  public:
-  explicit Writer(Node& n, Node* other = nullptr) : g_(n, other) {
-    if (g_.tree().busy || (g_.other() && g_.other()->busy))
-      throw nb::builtin_exception(
-          nb::exception_type::runtime_error,
-          "cannot modify a tree while an operation (calculate_layout or a change) is running on it");
-    ++g_.tree().busy;
-    if (g_.other()) ++g_.other()->busy;
+  explicit Writer(Node& n, const std::vector<Node*>& others = {}) : g_(n, others) {
+    for (auto& l : g_.locks())
+      if (l->busy)
+        throw nb::builtin_exception(
+            nb::exception_type::runtime_error,
+            "cannot modify a tree while an operation (calculate_layout or a change) is running on it");
+    for (auto& l : g_.locks()) ++l->busy;
   }
   Writer(const Writer&) = delete;
   Writer& operator=(const Writer&) = delete;
   ~Writer() {
-    --g_.tree().busy;
-    if (g_.other()) --g_.other()->busy;
+    for (auto& l : g_.locks()) --l->busy;
   }
   void finish() { rethrowPending(); }
   TreeLock& tree() { return g_.tree(); }
@@ -210,6 +225,11 @@ Node::~Node() {
 }  // `old` releases the children here, outside the lock; each frees itself the same way
 
 Node* nodeOf(YGNodeConstRef n) { return static_cast<Node*>(YGNodeGetContext(n)); }
+
+Node& asNode(nb::handle h) {
+  if (!nb::isinstance<Node>(h)) throw nb::type_error("expected a Node");
+  return nb::cast<Node&>(h);
+}
 
 // A new reference to the Python object of `n`'s parent, or an empty object if there is none or
 // it is already being destroyed. This goes through a weak reference: the destructor of a dying
@@ -452,6 +472,8 @@ NB_MODULE(_core, m) {
              YGErrataAbsolutePositionWithoutInsetsExcludesPadding)
       .value("ABSOLUTE_PERCENT_AGAINST_INNER_SIZE", YGErrataAbsolutePercentAgainstInnerSize)
       .value("CLASSIC", YGErrataClassic).value("ALL", YGErrataAll);
+  nb::enum_<YGNodeType>(m, "NodeType")
+      .value("DEFAULT", YGNodeTypeDefault).value("TEXT", YGNodeTypeText);
   nb::enum_<YGExperimentalFeature>(m, "ExperimentalFeature")
       .value("WEB_FLEX_BASIS", YGExperimentalFeatureWebFlexBasis);
 
@@ -516,8 +538,8 @@ NB_MODULE(_core, m) {
   // tree
   node.def_prop_ro("config", [](Node& n) { return n.config; })
       .def("insert_child", [](Node& self, nb::object child_obj, std::optional<size_t> index) {
-        Node& child = nb::cast<Node&>(child_obj);
-        Writer w(self, &child);
+        Node& child = asNode(child_obj);
+        Writer w(self, {&child});
         size_t idx = index.value_or(self.children.size());
         requireChildIndex(self, idx, true);
         if (&child == &self || isAncestorOrSelf(&child, &self))
@@ -536,7 +558,7 @@ NB_MODULE(_core, m) {
         w.finish();
       }, "child"_a, "index"_a = nb::none())
       .def("remove_child", [](Node& self, nb::object child_obj) {
-        Node& child = nb::cast<Node&>(child_obj);
+        Node& child = asNode(child_obj);
         Writer w(self);
         for (size_t i = 0; i < self.children.size(); ++i) {
           if (self.children[i].ptr() == child_obj.ptr()) {
@@ -557,6 +579,41 @@ NB_MODULE(_core, m) {
         old.swap(self.children);
         w.finish();
       })
+      .def("set_children", [](Node& self, nb::iterable seq) {
+        std::vector<nb::object> objs;
+        std::vector<Node*> nodes;
+        for (nb::handle h : seq) {
+          objs.push_back(nb::borrow(h));
+          nodes.push_back(&asNode(h));
+        }
+        std::vector<nb::object> old;  // released after the lock
+        Writer w(self, nodes);
+        // Validate everything first so a failure changes nothing.
+        for (size_t i = 0; i < nodes.size(); ++i) {
+          Node* c = nodes[i];
+          for (size_t j = 0; j < i; ++j)
+            if (nodes[j] == c) throw nb::value_error("the same node appears twice in children");
+          if (c == &self || isAncestorOrSelf(c, &self))
+            throw nb::value_error("cannot insert a node into itself or one of its descendants");
+          YGNodeRef owner = YGNodeGetOwner(c->ref);
+          if (owner != nullptr && owner != self.ref)
+            throw nb::value_error("node already has a parent; remove it first");
+        }
+        if (!nodes.empty() && YGNodeHasMeasureFunc(self.ref))
+          throw nb::value_error("a node with a measure function cannot have children");
+        detachChildren(self);
+        old.swap(self.children);
+        nb::object parent_obj = nb::borrow(nb::find(&self));
+        for (size_t i = 0; i < nodes.size(); ++i) {
+          YGNodeInsertChild(self.ref, nodes[i]->ref, i);
+          PyObject* wr = PyWeakref_NewRef(parent_obj.ptr(), nullptr);
+          if (!wr) throw nb::python_error();
+          nodes[i]->parent_ref = nb::steal(wr);
+          retree(*nodes[i], treeOf(self));
+          self.children.push_back(std::move(objs[i]));
+        }
+        w.finish();
+      }, "children"_a)
       .def_prop_ro("children", [](Node& n) {
         TreeGuard g(n);
         nb::list l;
@@ -651,6 +708,17 @@ NB_MODULE(_core, m) {
         n.dirtied = std::move(fn);
         YGNodeSetDirtiedFunc(n.ref, dirtiedTrampoline);
       }, "fn"_a.none());
+
+  // ---- node flags
+  node.def_prop_rw("node_type", [](Node& n) { TreeGuard g(n); return YGNodeGetNodeType(n.ref); },
+                   [](Node& n, YGNodeType v) { Writer w(n); YGNodeSetNodeType(n.ref, v); w.finish(); })
+      .def_prop_rw("always_forms_containing_block",
+                   [](Node& n) { TreeGuard g(n); return YGNodeGetAlwaysFormsContainingBlock(n.ref); },
+                   [](Node& n, bool v) { Writer w(n); YGNodeSetAlwaysFormsContainingBlock(n.ref, v); w.finish(); })
+      .def_prop_rw("is_reference_baseline",
+                   [](Node& n) { TreeGuard g(n); return YGNodeIsReferenceBaseline(n.ref); },
+                   [](Node& n, bool v) { Writer w(n); YGNodeSetIsReferenceBaseline(n.ref, v); w.finish(); })
+      .def_prop_ro("has_baseline", [](Node& n) { TreeGuard g(n); return YGNodeHasBaselineFunc(n.ref); });
 
   // ---- style: enum / float properties
 #define PROP_ENUM(py, T, Get, Set) \

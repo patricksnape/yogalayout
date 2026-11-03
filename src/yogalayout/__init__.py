@@ -19,6 +19,7 @@ from ._core import (
     Justify,
     Layout,
     MeasureMode,
+    NodeType,
     Overflow,
     PositionType,
     Unit,
@@ -38,6 +39,7 @@ _ENUM_PROPS: dict[str, Any] = {
     "overflow": Overflow,
     "display": Display,
     "box_sizing": BoxSizing,
+    "node_type": NodeType,
 }
 _ALIASES = {"position": "position_type", "wrap": "flex_wrap"}
 _PLAIN = {
@@ -52,6 +54,8 @@ _PLAIN = {
     "min_height",
     "max_width",
     "max_height",
+    "always_forms_containing_block",
+    "is_reference_baseline",
 }
 _EDGES = {
     "": Edge.ALL,
@@ -131,8 +135,7 @@ class Node(_core.Node):
     ) -> None:
         super().__init__(config)
         self.style(**style)
-        for child in children:
-            self.insert_child(child)
+        self.set_children(children)
         if measure is not None:
             self.set_measure(measure)
 
@@ -186,6 +189,7 @@ __all__ = [
     "Layout",
     "MeasureMode",
     "Node",
+    "NodeType",
     "Overflow",
     "PositionType",
     "Unit",
