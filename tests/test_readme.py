@@ -11,4 +11,4 @@ def test_readme_snippets_run():
     assert len(blocks) >= 3
     namespace: dict = {}
     for i, code in enumerate(blocks):
-        exec(compile(code, f"README.md (python block {i})", "exec"), namespace)
+        exec(compile(code, f"README.md (python block {i})", "exec"), namespace)  # noqa: S102
